@@ -1,5 +1,5 @@
 [project]
-name = "eda-agent"
+name = "eda-workflow"
 version = "0.1.0"
 description = "Exploratory Data Analysis workflow for consistent first-pass dataset analysis"
 authors = [
