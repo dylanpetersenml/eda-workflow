@@ -222,13 +222,43 @@ def make_eda_baseline_workflow(
     def compute_aggregates_node(state: EDAState):
         """Compute group-by aggregates on key columns.
         
-        TODO: Implement this analysis tool.
-        
         See profile_dataset_node and analyze_missingness_node for reference.
         Store your results in results["compute_aggregates"] and return
         {"current_step": "compute_aggregates", "results": results}.
         """
         logger.info("Computing aggregates")
+        df = pd.DataFrame.from_dict(state.get("dataframe"))
+        results = state.get("results", {})
+        obj_cols = df.select_dtypes(include="object").columns
+
+        candidates = (
+            df[obj_cols].nunique()
+            .sort_values()
+            .to_frame("nunique")
+        )
+
+        candidates["pct_unique"] = candidates["nunique"] / len(df)
+
+        candidates = candidates[(candidates["pct_unique"] < 0.8) & (candidates["nunique"] > 1)]
+
+        grouped_counts = {
+            c: df.groupby(c).size().sort_values(ascending=False).reset_index(name="count")
+            for c in candidates.index
+        }
+
+        num_cols = df.select_dtypes(include="number").columns
+
+        grouped_aggs = {
+            c: df.groupby(c)[num_cols].agg(["count", "sum", "mean"]).reset_index()
+            for c in candidates.index
+        }
+
+        results["compute_aggregates"] = grouped_aggs
+
+        return {
+            "current_step": "compute_aggregates",
+            "results": results,
+        }
     
     def analyze_relationships_node(state: EDAState):
         """Analyze relationships between variables.
@@ -240,6 +270,13 @@ def make_eda_baseline_workflow(
         {"current_step": "analyze_relationships", "results": results}.
         """
         logger.info("Analyzing relationships")
+        df = pd.DataFrame.from_dict(state.get("dataframe"))
+        results = state.get("results", {})
+        results["analyze_relationships"] = df.select_dtypes(include=["number"]).corr()
+        return {
+            "current_step": "analyze_relationships",
+            "results": results,
+        }
     
     def extract_observations_node(state: EDAState):
         """Extract observations from the latest analysis results using LLM."""
