@@ -4,9 +4,11 @@ from typing import Optional, TypedDict
 
 import pandas as pd
 from pydantic import BaseModel, Field
+import numpy as np
 
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.graph import StateGraph, END
+import scipy.stats as stats
 
 logger = logging.getLogger(__name__)
 WORKFLOW_NAME = "eda_workflow"
@@ -278,6 +280,53 @@ def make_eda_baseline_workflow(
             "results": results,
         }
     
+    def analyze_distributions(state: EDAState):
+        """to provide visibility on distribution of variables.
+        Store your results in results["analyze_distributions"] and return
+        {"current_step": "analyze_distributions", "results": results}.
+        """
+        logger.info("Analyze Distributions")
+        df = pd.DataFrame.from_dict(state.get("dataframe"))
+        results = state.get("results", {})
+
+        num_cols = df.select_dtypes(include=np.number).columns
+    
+        distribution_results = {}
+
+        for col in num_cols:
+            data = df[col].dropna()
+            data = data[np.isfinite(data)]
+
+            if len(data) < 8:  # too small for normality tests
+                continue
+
+            skew = stats.skew(data)
+            kurt = stats.kurtosis(data)
+            dagostino_stat, dagostino_p = stats.normaltest(data)
+
+            # Classification rule (practical DS thresholds)
+            if abs(skew) < 0.5:
+                shape = "Approximately Normal"
+            elif abs(skew) < 1:
+                shape = "Moderately Skewed"
+            else:
+                shape = "Highly Skewed"
+
+            distribution_results[col] = {
+                "skewness": float(skew),
+                "kurtosis": float(kurt),
+                "dagostino_p": float(dagostino_p),
+                "distribution_shape": shape
+            }
+
+        results['analyze_distributions'] = distribution_results
+
+        return {
+            "current_step": "analyze_distributions",
+            "results": results,
+        }
+    
+    
     def extract_observations_node(state: EDAState):
         """Extract observations from the latest analysis results using LLM."""
         logger.info("Extracting observations")
@@ -358,6 +407,8 @@ def make_eda_baseline_workflow(
     workflow.add_node("extract_observations_3", extract_observations_node)
     workflow.add_node("analyze_relationships", analyze_relationships_node)
     workflow.add_node("extract_observations_4", extract_observations_node)
+    workflow.add_node("analyze_distributions", analyze_distributions)
+    workflow.add_node("extract_observations_5", extract_observations_node)
     workflow.add_node("synthesize_findings", synthesize_findings_node)
     
     workflow.set_entry_point("profile_dataset")
@@ -369,7 +420,9 @@ def make_eda_baseline_workflow(
     workflow.add_edge("compute_aggregates", "extract_observations_3")
     workflow.add_edge("extract_observations_3", "analyze_relationships")
     workflow.add_edge("analyze_relationships", "extract_observations_4")
-    workflow.add_edge("extract_observations_4", "synthesize_findings")
+    workflow.add_edge("extract_observations_4", "analyze_distributions")
+    workflow.add_edge("analyze_distributions", "extract_observations_5")
+    workflow.add_edge("extract_observations_5", "synthesize_findings")
     workflow.add_edge("synthesize_findings", END)
     
     app = workflow.compile(checkpointer=checkpointer, name=WORKFLOW_NAME)
