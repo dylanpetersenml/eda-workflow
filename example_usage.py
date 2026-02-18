@@ -19,7 +19,7 @@ from eda_workflow.eda_workflow import EDAWorkflow
 load_dotenv()
 
 # Path to sample dataset
-data_path = os.path.join("data", "cafe_sales.csv")
+data_path = os.path.join("data", "paddle_view.csv")
 
 # Initialize OpenAI model
 llm = ChatOpenAI(
